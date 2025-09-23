@@ -171,6 +171,7 @@ router.get('/', authenticateToken, async (req, res) => {
       employee: device.custom1 || (device.user ? device.user.name : null),
       lastSeen: device.lastSeen ? formatLastSeen(device.lastSeen) : 'Hiç görülmedi',
       isEnrolled: device.isEnrolled,
+      kioskMode: device.kioskMode,
       commandCount: device._count.commands,
       eventCount: device._count.events
     }));
@@ -420,7 +421,7 @@ router.get('/:id', (req, res) => {
 router.post('/:id/commands', authenticateToken, requireDeviceOwnership, async (req, res) => {
   try {
     const deviceId = parseInt(req.params.id);
-    const { action } = req.body;
+    const { action, parameters } = req.body;
     
     // Cihazın var olup olmadığını kontrol et
     const device = await prisma.device.findUnique({
@@ -434,8 +435,8 @@ router.post('/:id/commands', authenticateToken, requireDeviceOwnership, async (r
       });
     }
     
-    // Komut tipini validate et
-    const validActions = ['lock', 'unlock', 'wipe', 'locate', 'restart', 'alert', 'install_app', 'uninstall_app'];
+  // Komut tipini validate et
+    const validActions = ['lock', 'unlock', 'wipe', 'locate', 'restart', 'alert', 'install_app', 'uninstall_app', 'kiosk_on', 'kiosk_off'];
     if (!validActions.includes(action)) {
       return res.status(400).json({
         success: false,
@@ -452,7 +453,9 @@ router.post('/:id/commands', authenticateToken, requireDeviceOwnership, async (r
       'restart': 'RESTART',
       'alert': 'ALARM',
       'install_app': 'INSTALL_APP',
-      'uninstall_app': 'UNINSTALL_APP'
+      'uninstall_app': 'UNINSTALL_APP',
+      'kiosk_on': 'SET_POLICY',
+      'kiosk_off': 'SET_POLICY'
     };
 
     // Database'e komut ekle
@@ -461,6 +464,8 @@ router.post('/:id/commands', authenticateToken, requireDeviceOwnership, async (r
         action: commandTypeMap[action],
         status: 'PENDING',
         description: `${action} komutu gönderildi`,
+        // Store parameters for ALARM and other commands
+        parameters: parameters ? JSON.stringify(parameters) : (action.startsWith('kiosk_') ? JSON.stringify({ kioskEnabled: action === 'kiosk_on' }) : null),
         deviceId: deviceId,
         createdById: req.user.id // Gerçek kullanıcı ID'si
       }
@@ -468,6 +473,28 @@ router.post('/:id/commands', authenticateToken, requireDeviceOwnership, async (r
     
     // Burada MDM komutları işlenecek
     console.log(`Cihaz ${deviceId} için ${action} komutu gönderiliyor...`);
+
+    // Kiosk modunu backend state'inde de güncelle (hemen yansıtmak için)
+    if (action === 'kiosk_on' || action === 'kiosk_off') {
+      const enable = action === 'kiosk_on';
+      try {
+        await prisma.device.update({
+          where: { id: deviceId },
+          data: { kioskMode: enable }
+        });
+        await prisma.deviceEvent.create({
+          data: {
+            deviceId: deviceId,
+            eventType: 'STATUS_CHANGE',
+            title: 'Kiosk Modu',
+            description: `Kiosk modu ${enable ? 'açıldı' : 'kapandı'}`,
+            severity: enable ? 'INFO' : 'INFO'
+          }
+        });
+      } catch (e) {
+        console.error('Kiosk mode update error:', e);
+      }
+    }
     
     res.json({
       success: true,
@@ -477,6 +504,7 @@ router.post('/:id/commands', authenticateToken, requireDeviceOwnership, async (r
         deviceId,
         action,
         status: command.status,
+        parameters: command.parameters ? JSON.parse(command.parameters) : null,
         timestamp: command.createdAt
       }
     });

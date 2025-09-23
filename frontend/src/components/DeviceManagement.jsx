@@ -13,7 +13,8 @@ import {
   Phone,
   AlertTriangle,
   Settings,
-  Package
+  Package,
+  Shield
 } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { deviceApi, commandApi } from '../services/api'
@@ -26,6 +27,16 @@ function DeviceManagement({ device, onClose, onDeviceUpdate }) {
   const [appLoading, setAppLoading] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [deleteLoading, setDeleteLoading] = useState(false)
+  const [showAlarmModal, setShowAlarmModal] = useState(false)
+  const [alarmMessage, setAlarmMessage] = useState('Uyarı: Lütfen yöneticinizle iletişime geçin')
+  const [alarmWhen, setAlarmWhen] = useState('now') // 'now' | 'schedule'
+  const [alarmTime, setAlarmTime] = useState('') // ISO local string or HH:mm
+  const [alarmSending, setAlarmSending] = useState(false)
+  const [kioskToggling, setKioskToggling] = useState(false)
+  const [showLocationModal, setShowLocationModal] = useState(false)
+  const [locating, setLocating] = useState(false)
+  const [currentLocation, setCurrentLocation] = useState(device?.location || '')
+  const [appSearch, setAppSearch] = useState('')
 
   // Cihaza ait aktiviteleri çek
   useEffect(() => {
@@ -223,6 +234,14 @@ function DeviceManagement({ device, onClose, onDeviceUpdate }) {
         <h3>Cihaz İşlemleri</h3>
         <div className="actions-grid">
           <button 
+            className={`action-button ${device.kioskMode ? 'unlock' : 'lock'} disabled`}
+            disabled={true}
+            title="Yakında etkinleştirilecek"
+          >
+            <Shield size={20} />
+            <span>Kiosk Modu (Yakında)</span>
+          </button>
+          <button 
             className="action-button lock disabled"
             disabled={true}
             title="Bu özellik henüz aktif değil"
@@ -241,12 +260,28 @@ function DeviceManagement({ device, onClose, onDeviceUpdate }) {
           </button>
           
           <button 
-            className="action-button locate disabled"
-            disabled={true}
-            title="Bu özellik henüz aktif değil"
+            className="action-button locate"
+            disabled={loading || locating}
+            title="Cihaz konumunu göster"
+            onClick={async (e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              try {
+                setShowLocationModal(true)
+                setLocating(true)
+                setCurrentLocation(device?.location || '')
+                // Arka planda locate komutunu gönder
+                await deviceApi.sendCommand(device.id, 'locate')
+                await fetchDeviceActivities()
+              } catch (e) {
+                console.error('Konum komutu hatası:', e)
+              } finally {
+                setLocating(false)
+              }
+            }}
           >
             <MapPin size={20} />
-            <span>Konum Bul</span>
+            <span>{locating ? 'Konum İsteniyor...' : 'Konum Bul'}</span>
           </button>
           
           <button 
@@ -282,6 +317,7 @@ function DeviceManagement({ device, onClose, onDeviceUpdate }) {
           
           <button 
             className="action-button alert disabled"
+            onClick={() => {}}
             disabled={true}
             title="Bu özellik henüz aktif değil"
           >
@@ -393,7 +429,23 @@ function DeviceManagement({ device, onClose, onDeviceUpdate }) {
                 </div>
               ) : (
                 <div className="app-list">
-                  {deviceApps.map((app) => (
+                  <div style={{display: 'flex', marginBottom: 12}}>
+                    <input 
+                      type="text" 
+                      placeholder="Uygulama adı veya paket ara..."
+                      value={appSearch}
+                      onChange={(e) => setAppSearch(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '8px 10px',
+                        borderRadius: 6,
+                        border: '1px solid var(--border-primary)',
+                        background: 'var(--bg-secondary)',
+                        color: 'var(--text-primary)'
+                      }}
+                    />
+                  </div>
+                  {(appSearch ? deviceApps.filter(a => (a.name||'').toLowerCase().includes(appSearch.toLowerCase()) || (a.packageName||'').toLowerCase().includes(appSearch.toLowerCase())) : deviceApps).map((app) => (
                     <div key={app.id} className="app-item" style={{background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)', color: 'var(--text-primary)'}}>
                       <div className="app-info">
                         <div className="app-icon" style={{width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
@@ -424,6 +476,133 @@ function DeviceManagement({ device, onClose, onDeviceUpdate }) {
                       </div>
                     </div>
                   ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Alarm Gönder Modal */}
+      {showAlarmModal && (
+        <div className="app-management-modal" style={{zIndex: 9999}}>
+          <div className="modal-overlay" onClick={() => setShowAlarmModal(false)}></div>
+          <div className="modal-content" style={{zIndex: 10000, position: 'relative'}}>
+            <div className="modal-header">
+              <h3>Alarm Gönder</h3>
+              <button className="close-button" onClick={() => setShowAlarmModal(false)}>
+                <X size={20} />
+              </button>
+            </div>
+            <div className="modal-body" style={{background: 'var(--bg-primary)', color: 'var(--text-primary)'}}>
+              <div className="form-group" style={{marginBottom: 16}}>
+                <label>Mesaj</label>
+                <input
+                  type="text"
+                  value={alarmMessage}
+                  onChange={(e) => setAlarmMessage(e.target.value)}
+                  placeholder="Cihazda görünecek mesaj"
+                  style={{width: '100%'}}
+                />
+              </div>
+              <div className="form-group" style={{marginBottom: 16}}>
+                <label>Zaman</label>
+                <div style={{display: 'flex', gap: 12, alignItems: 'center'}}>
+                  <label style={{display: 'flex', alignItems: 'center', gap: 6}}>
+                    <input type="radio" name="alarmWhen" value="now" checked={alarmWhen === 'now'} onChange={() => setAlarmWhen('now')} />
+                    Şimdi gönder
+                  </label>
+                  <label style={{display: 'flex', alignItems: 'center', gap: 6}}>
+                    <input type="radio" name="alarmWhen" value="schedule" checked={alarmWhen === 'schedule'} onChange={() => setAlarmWhen('schedule')} />
+                    Belirli saatte
+                  </label>
+                  {alarmWhen === 'schedule' && (
+                    <input
+                      type="datetime-local"
+                      value={alarmTime}
+                      onChange={(e) => setAlarmTime(e.target.value)}
+                    />
+                  )}
+                </div>
+              </div>
+              <div className="confirmation-actions">
+                <button 
+                  className="cancel-button"
+                  onClick={() => setShowAlarmModal(false)}
+                  disabled={alarmSending}
+                >
+                  İptal
+                </button>
+                <button 
+                  className="delete-button danger"
+                  onClick={async () => {
+                    try {
+                      setAlarmSending(true)
+                      const params = {
+                        message: alarmMessage,
+                        scheduleAt: alarmWhen === 'schedule' && alarmTime ? new Date(alarmTime).toISOString() : null
+                      }
+                      const result = await deviceApi.sendCommand(device.id, 'alert', params)
+                      if (result.success) {
+                        await fetchDeviceActivities()
+                        if (onDeviceUpdate) onDeviceUpdate()
+                        alert(params.scheduleAt ? 'Alarm planlandı' : 'Alarm gönderildi')
+                        setShowAlarmModal(false)
+                      } else {
+                        alert('Alarm gönderilirken hata: ' + result.error)
+                      }
+                    } catch (e) {
+                      console.error('Alarm gönderme hatası:', e)
+                      alert('Alarm gönderilirken bir hata oluştu')
+                    } finally {
+                      setAlarmSending(false)
+                    }
+                  }}
+                  disabled={alarmSending || (alarmWhen === 'schedule' && !alarmTime)}
+                >
+                  {alarmSending ? 'Gönderiliyor...' : (alarmWhen === 'schedule' ? 'Planla' : 'Şimdi Gönder')}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Konum Modal */}
+      {showLocationModal && (
+        <div className="app-management-modal" style={{zIndex: 9999}}>
+          <div className="modal-overlay" onClick={() => setShowLocationModal(false)}></div>
+          <div className="modal-content" style={{zIndex: 10000, position: 'relative'}}>
+            <div className="modal-header">
+              <h3>Cihaz Konumu</h3>
+              <button className="close-button" onClick={() => setShowLocationModal(false)}>
+                <X size={20} />
+              </button>
+            </div>
+            <div className="modal-body" style={{background: 'var(--bg-primary)', color: 'var(--text-primary)'}}>
+              {currentLocation ? (
+                <div style={{display: 'flex', flexDirection: 'column', gap: 12}}>
+                  <div>
+                    <label>Koordinatlar</label>
+                    <div style={{marginTop: 6}}>{currentLocation}</div>
+                  </div>
+                  <a
+                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(currentLocation)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="action-button"
+                    style={{display: 'inline-flex', alignItems: 'center', gap: 8, width: 'fit-content'}}
+                  >
+                    <MapPin size={16} /> Google Haritalar'da Aç
+                  </a>
+                  <div style={{fontSize: 12, color: 'var(--text-secondary)'}}>
+                    Konum cihazdan periyodik olarak güncellenir. En güncel konum için birkaç saniye sonra tekrar deneyin.
+                  </div>
+                </div>
+              ) : (
+                <div className="loading-container">
+                  <div className="loading-spinner"></div>
+                  <p>Konum alınıyor...</p>
                 </div>
               )}
             </div>

@@ -217,6 +217,8 @@ router.post('/:project/rest/public/sync/configuration/:number', async (req, res)
 
     const hasBgImage = !!(theme.backgroundImageUrl);
     const bgFields = await buildBackgroundFields(theme, req);
+    const hostHeader = req.headers.host;
+    const baseUrl = hostHeader ? `http://${hostHeader}` : '';
     const config = {
       newNumber: number,
       backgroundColor: hasBgImage ? theme.backgroundColor : theme.backgroundColor,
@@ -241,7 +243,7 @@ router.post('/:project/rest/public/sync/configuration/:number', async (req, res)
       bluetooth: true,
       wifi: true,
       mobileData: true,
-      kioskMode: true,
+      kioskMode: device.kioskMode === true,
       mainApp: "",
       lockStatusBar: false,
       lockVolume: false,
@@ -276,7 +278,7 @@ router.post('/:project/rest/public/sync/configuration/:number', async (req, res)
       systemUpdateFrom: "",
       systemUpdateTo: "",
       allowedClasses: "",
-      allowedPackages: "",
+      allowedPackages: (device.kioskMode === true) ? (device.launcherPackage || 'com.hmdm.launcher') : "",
       disallowedPackages: "",
       pushOptions: "polling",
       keepaliveTime: 30,
@@ -293,21 +295,21 @@ router.post('/:project/rest/public/sync/configuration/:number', async (req, res)
       passwordMode: "none",
       timeZone: "",
       orientation: 0,
-      kioskHome: false,
-      kioskRecents: false,
-      kioskNotifications: false,
-      kioskSystemInfo: false,
-      kioskKeyguard: false,
-      kioskLockButtons: false,
+      kioskHome: !!device.kioskMode,
+      kioskRecents: !!device.kioskMode,
+      kioskNotifications: !!device.kioskMode,
+      kioskSystemInfo: !!device.kioskMode,
+      kioskKeyguard: !!device.kioskMode,
+      kioskLockButtons: !!device.kioskMode,
       description: "",
       custom1: "",
       custom2: "",
       custom3: "",
       runDefaultLauncher: false,
-      newServerUrl: "",
+      newServerUrl: baseUrl,
       lockSafeSettings: false,
       permissive: false,
-      kioskExit: false,
+      kioskExit: !device.kioskMode,
       disableScreenshots: false,
       autostartForeground: false,
       showWifi: false,
@@ -367,6 +369,8 @@ router.get('/:project/rest/public/sync/configuration/:number', async (req, res) 
     const theme = await getThemeSettings(req);
     const hasBgImage2 = !!(theme.backgroundImageUrl);
     const bgFields2 = await buildBackgroundFields(theme, req);
+    const hostHeader2 = req.headers.host;
+    const baseUrl2 = hostHeader2 ? `http://${hostHeader2}` : '';
     const config = {
       newNumber: number,
       backgroundColor: hasBgImage2 ? theme.backgroundColor : theme.backgroundColor,
@@ -389,7 +393,7 @@ router.get('/:project/rest/public/sync/configuration/:number', async (req, res) 
       bluetooth: true,
       wifi: true,
       mobileData: true,
-      kioskMode: true,
+      kioskMode: device.kioskMode === true,
       mainApp: "",
       lockStatusBar: false,
       lockVolume: false,
@@ -424,7 +428,7 @@ router.get('/:project/rest/public/sync/configuration/:number', async (req, res) 
       systemUpdateFrom: "",
       systemUpdateTo: "",
       allowedClasses: "",
-      allowedPackages: "",
+      allowedPackages: (device.kioskMode === true) ? (device.launcherPackage || 'com.hmdm.launcher') : "",
       disallowedPackages: "",
       pushOptions: "polling",
       keepaliveTime: 30,
@@ -441,21 +445,21 @@ router.get('/:project/rest/public/sync/configuration/:number', async (req, res) 
       passwordMode: "none",
       timeZone: "",
       orientation: 0,
-      kioskHome: false,
-      kioskRecents: false,
-      kioskNotifications: false,
-      kioskSystemInfo: false,
-      kioskKeyguard: false,
-      kioskLockButtons: false,
+      kioskHome: !!device.kioskMode,
+      kioskRecents: !!device.kioskMode,
+      kioskNotifications: !!device.kioskMode,
+      kioskSystemInfo: !!device.kioskMode,
+      kioskKeyguard: !!device.kioskMode,
+      kioskLockButtons: !!device.kioskMode,
       description: "",
       custom1: "",
       custom2: "",
       custom3: "",
       runDefaultLauncher: false,
-      newServerUrl: "",
+      newServerUrl: baseUrl2,
       lockSafeSettings: false,
       permissive: false,
-      kioskExit: false,
+      kioskExit: !device.kioskMode,
       disableScreenshots: false,
       autostartForeground: false,
       showWifi: false,
@@ -578,20 +582,54 @@ router.get('/:project/rest/notifications/device/:number', async (req, res) => {
       orderBy: { createdAt: 'asc' }
     });
 
-    const notifications = pendingCommands.map(cmd => ({
-      id: cmd.id,
-      type: 'command',
-      action: cmd.action,
-      parameters: cmd.parameters ? JSON.parse(cmd.parameters) : {},
-      description: cmd.description
-    }));
+    // Headwind launcher expects a list of PushMessage objects
+    // Build messages for alarm commands and ignore future-scheduled ones
+    const now = new Date();
+    const messages = [];
+
+    for (const cmd of pendingCommands) {
+      const params = cmd.parameters ? JSON.parse(cmd.parameters) : {};
+      const scheduleAt = params && params.scheduleAt ? new Date(params.scheduleAt) : null;
+
+      if (cmd.action === 'ALARM') {
+        // Skip if scheduled for the future
+        if (scheduleAt && scheduleAt > now) {
+          continue;
+        }
+        const payload = {
+          title: 'MDM Alarm',
+          message: params && params.message ? params.message : (cmd.description || 'Yönetici tarafından alarm'),
+          commandId: cmd.id
+        };
+        messages.push({
+          messageType: 'showNotification',
+          payload: JSON.stringify(payload)
+        });
+        // Mark command as completed upon dispatching notification payload
+        try {
+          await prisma.command.update({
+            where: { id: cmd.id },
+            data: {
+              status: 'COMPLETED',
+              executedAt: new Date(),
+              completedAt: new Date(),
+              result: JSON.stringify({ delivered: true })
+            }
+          });
+        } catch (e) {}
+      } else {
+        // Non-alarm commands can be mapped to config update to force sync
+        messages.push({
+          messageType: 'configUpdated',
+          payload: ''
+        });
+      }
+    }
 
     res.json({
       status: "OK",
       message: "Notifications retrieved successfully",
-      data: {
-        notifications: notifications
-      }
+      data: messages
     });
 
   } catch (error) {
@@ -882,7 +920,9 @@ function getAppIcon(packageName) {
     'com.android.mms': '/icons/messages.png',
     'com.android.camera2': '/icons/camera.png',
     'com.android.gallery3d': '/icons/gallery.png',
-    'com.google.android.apps.messaging': '/icons/messages.png'
+    'com.google.android.apps.messaging': '/icons/messages.png',
+    'com.linkedin.android': '/icons/linkedin.png',
+    'com.microsoft.office.officehubrow': '/icons/office.png'
   };
   
   return iconMap[packageName] || 'android';

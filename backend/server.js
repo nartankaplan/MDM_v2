@@ -89,6 +89,18 @@ app.get('/', (req, res) => {
 
 // URL düzeltme middleware'i - Headwind route'undan önce
 app.use((req, res, next) => {
+  // Eski IP'den gelen istekleri güncel IP'ye yönlendir
+  try {
+    const host = req.headers.host || '';
+    if (host.startsWith('192.168.150.1')) {
+      const currentIP = getNetworkIP();
+      const targetHost = `${currentIP}:${process.env.PORT || 3001}`;
+      const redirectUrl = `http://${targetHost}${req.originalUrl.startsWith('/') ? req.originalUrl : '/' + req.originalUrl}`;
+      console.log(`🔁 Redirecting legacy host ${host} -> ${targetHost}`);
+      return res.redirect(301, redirectUrl);
+    }
+  } catch (_) {}
+
   // Eğer URL'de / eksikse ve default-project içeriyorsa düzelt
   if (req.originalUrl.includes('default-project') && !req.originalUrl.startsWith('/default-project')) {
     const correctedUrl = '/' + req.originalUrl;

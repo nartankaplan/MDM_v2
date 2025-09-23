@@ -35,16 +35,16 @@ const getApiBaseUrl = async () => {
       console.log('⚠️ Backend health check failed on current hostname...', error.message)
     }
     
-    // Fallback to localhost
-    cachedApiBaseUrl = `http://localhost:3001/api`
+    // Fallback: use current host with port 3001
+    cachedApiBaseUrl = `http://${host}:3001/api`
     lastCacheTime = Date.now()
     console.log('🌐 Current hostname:', host)
     console.log('🔗 Using fallback localhost URL:', cachedApiBaseUrl)
     return cachedApiBaseUrl
   }
   
-  // Production mode - use environment variable or default
-  cachedApiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001/api'
+  // Production mode - use environment variable or current host
+  cachedApiBaseUrl = import.meta.env.VITE_API_URL || `http://${window.location.hostname}:3001/api`
   lastCacheTime = Date.now()
   return cachedApiBaseUrl
 }
@@ -112,10 +112,10 @@ export const deviceApi = {
   getById: (id) => apiCall(`/devices/${id}`),
   
   // Send command to device
-  sendCommand: (deviceId, action) => 
+  sendCommand: (deviceId, action, parameters = null) => 
     apiCall(`/devices/${deviceId}/commands`, {
       method: 'POST',
-      body: JSON.stringify({ action })
+      body: JSON.stringify(parameters ? { action, parameters } : { action })
     }),
   
   // Create device
