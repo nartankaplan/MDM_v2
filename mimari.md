@@ -1,3 +1,74 @@
+
+mermaid 
+  flowchart LR
+  subgraph FE["Frontend (React/Vite)"]
+    FE_Dash["Dashboard.jsx"]
+    FE_List["DeviceList.jsx"]
+    FE_Mgmt["DeviceManagement.jsx"]
+    FE_API["services/api.js"]
+  end
+
+  subgraph BE["Backend (Express/Prisma)"]
+    BE_Auth["/api/auth"]
+    BE_Devices["/api/devices"]
+    BE_Commands["/api/commands"]
+    BE_Enroll["/api/enrollment"]
+    BE_Settings["/api/settings"]
+    BE_Headwind["/headwind routes"]
+    BE_Socket["Socket.IO"]
+  end
+
+  subgraph DB["SQLite via Prisma"]
+    DB_User["User"]
+    DB_Device["Device"]
+    DB_Command["Command"]
+    DB_App["Application, DeviceApplication"]
+    DB_Policy["Policy, DevicePolicy, PolicyApplication"]
+    DB_Event["DeviceEvent"]
+    DB_Setting["SystemSetting"]
+  end
+
+  subgraph Agent["Android Agent (Headwind compatible)"]
+    AG_Config["GET/POST /:project/rest/public/sync/configuration/:number"]
+    AG_Info["POST /:project/rest/public/sync/info"]
+    AG_Notif["GET /:project/rest/notifications/device/:number"]
+    AG_CmdDone["POST /:project/rest/public/sync/command/:commandId"]
+  end
+
+  %% Frontend -> Backend
+  FE_Dash -->|"GET devices"| BE_Devices
+  FE_List -->|"select device"| FE_Mgmt
+  FE_Mgmt -->|"GET apps"| BE_Devices
+  FE_Mgmt -->|"POST toggle app"| BE_Devices
+  FE_Mgmt -->|"POST sendCommand: lock / locate / alert"| BE_Devices
+  FE_API -->|"GET / POST / PUT"| BE_Auth & BE_Devices & BE_Commands & BE_Enroll & BE_Settings
+
+  %% Backend -> DB
+  BE_Auth --> DB_User & DB_Event
+  BE_Devices --> DB_Device & DB_Command & DB_App & DB_Event & DB_Policy
+  BE_Commands --> DB_Command & DB_User
+  BE_Enroll --> DB_Device & DB_User & DB_Event
+  BE_Settings --> DB_Setting
+  BE_Headwind --> DB_Device & DB_Command & DB_App & DB_Event & DB_Setting
+
+  %% Commands and Notifications Flow
+  BE_Devices -->|"create Command (PENDING)"| DB_Command
+  BE_Headwind <-->|"configUpdated / ALARM payloads"| AG_Notif
+  AG_Notif --> Agent
+  Agent -->|"pull config"| AG_Config
+  Agent -->|"send telemetry: location / apps / battery"| AG_Info
+  AG_Info --> BE_Headwind
+  BE_Headwind -->|"update"| DB_Device & DB_App & DB_Event
+  Agent -->|"command result"| AG_CmdDone
+  AG_CmdDone --> BE_Headwind -->|"update status"| DB_Command
+
+  %% Auth
+  FE_API -->|"POST login"| BE_Auth -->|"JWT"| FE_API
+
+  %% Real-time (future use)
+  BE_Socket -. broadcast .-> FE_Dash
+
+
 # MDM_v2 Mimari Dokümanı
 
 Bu doküman, MDM_v2 projesinin mimarisini; kullanılan araçları, veri modellerini, backend endpoint'lerini, frontend akışlarını ve Headwind integration'ı detaylıca açıklar. Amaç; yeni geliştiricilerin projeyi hızla kavrayabilmesi ve genişletirken tutarlılığı korumasıdır.
