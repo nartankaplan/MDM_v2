@@ -242,4 +242,3 @@ Not: Kiosk Mode akışı şu aşamada UI’da pasifleştirilmiş, ileride Headwi
 - Error/Retry: Agent push/config akışı için yeniden deneme ve durum senkronizasyonları zenginleştirilebilir.
 
 ---
-Bu doküman, projenin mevcut durumunu ve ana akışları özetler. Yeni modüller eklendikçe veya davranışlar değiştikçe güncellenmelidir.
